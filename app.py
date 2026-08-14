@@ -28,7 +28,7 @@ def procesar_portada_y_guardar(image_file, gemini_key):
 
     # Llamada a la API oficial
     response = client.models.generate_content(
-        model='gemini-2.0-flash',
+        model='gemini-2.5-flash',
         contents=[
             genai.types.Part.from_bytes(data=bytes_data, mime_type="image/jpeg"),
             prompt_text
