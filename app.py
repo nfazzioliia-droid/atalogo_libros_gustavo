@@ -22,7 +22,7 @@ def procesar_portada_y_guardar(image_file, gemini_key):
     bytes_data = image_file.getvalue()
     base64_image = base64.b64encode(bytes_data).decode('utf-8')
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key.strip()}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key.strip()}"
     headers = {"Content-Type": "application/json"}
     
     prompt_text = "Extrae el título y el autor del libro de esta portada. Responde ÚNICAMENTE un objeto JSON válido con este formato exacto: {\"titulo\": \"...\", \"autor\": \"...\"}"
