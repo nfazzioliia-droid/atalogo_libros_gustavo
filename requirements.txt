@@ -1,6 +1,5 @@
 streamlit
 gspread
-google-auth
 requests
-google-generativeai 
-google-auth-oauthlib
+google-generativeai
+google-auth
