@@ -1,4 +1,5 @@
 streamlit
 gspread
-requests
 google-auth
+google-genai
+requests
