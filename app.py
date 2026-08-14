@@ -18,12 +18,14 @@ def conectar_sheets():
 
 # Función para procesar foto y buscar datos
 def procesar_portada_y_guardar(image_file, api_key):
-    # 1. OCR / Visión con OpenAI
     import base64
     bytes_data = image_file.getvalue()
     base64_image = base64.b64encode(bytes_data).decode('utf-8')
 
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "Authorization": f"Bearer {api_key.strip()}",
+        "Content-Type": "application/json"
+    }
     payload = {
         "model": "gpt-4o-mini",
         "messages": [{
@@ -37,6 +39,10 @@ def procesar_portada_y_guardar(image_file, api_key):
     }
     
     res = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload).json()
+    
+    if "error" in res:
+        raise Exception(f"Error de OpenAI: {res['error'].get('message', res['error'])}")
+        
     datos = json.loads(res['choices'][0]['message']['content'])
     
     titulo = datos.get("titulo", "Desconocido")
