@@ -2,6 +2,7 @@ import streamlit as st
 import gspread
 import requests
 import json
+from google import genai
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Escáner de Libros", page_icon="📚")
@@ -16,41 +17,28 @@ def conectar_sheets():
     client = gspread.authorize(creds)
     return client.open("Catálogo Biblioteca").sheet1
 
-# Función para procesar portada usando Gemini (Google AI)
+# Función para procesar portada usando la librería oficial de Gemini
 def procesar_portada_y_guardar(image_file, gemini_key):
-    import base64
+    # Inicializar cliente de Google GenAI
+    client = genai.Client(api_key=gemini_key.strip())
+    
     bytes_data = image_file.getvalue()
-    base64_image = base64.b64encode(bytes_data).decode('utf-8')
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key.strip()}"
-    headers = {"Content-Type": "application/json"}
     
     prompt_text = "Extrae el título y el autor del libro de esta portada. Responde ÚNICAMENTE un objeto JSON válido con este formato exacto: {\"titulo\": \"...\", \"autor\": \"...\"}"
 
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt_text},
-                {
-                    "inline_data": {
-                        "mime_type": "image/jpeg",
-                        "data": base64_image
-                    }
-                }
-            ]
-        }],
-        "generationConfig": {
-            "response_mime_type": "application/json"
-        }
-    }
+    # Llamada a la API oficial
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=[
+            genai.types.Part.from_bytes(data=bytes_data, mime_type="image/jpeg"),
+            prompt_text
+        ],
+        config=genai.types.GenerateContentConfig(
+            response_mime_type="application/json"
+        )
+    )
 
-    res = requests.post(url, headers=headers, json=payload).json()
-
-    if "error" in res:
-        raise Exception(f"Error de Gemini: {res['error'].get('message', res['error'])}")
-
-    texto_respuesta = res['candidates'][0]['content']['parts'][0]['text']
-    datos = json.loads(texto_respuesta)
+    datos = json.loads(response.text)
 
     titulo = datos.get("titulo", "Desconocido")
     autor = datos.get("autor", "Desconocido")
