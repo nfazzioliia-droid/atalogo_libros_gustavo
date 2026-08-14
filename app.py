@@ -2,35 +2,44 @@ import streamlit as st
 import gspread
 import requests
 import json
+import re
 from google import genai
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Escáner de Libros", page_icon="📚")
 st.title("📚 Escáner Automático de Libros")
 
+# ------------------------------------------------------------
+# CONEXIÓN A GOOGLE SHEETS
+# ------------------------------------------------------------
 @st.cache_resource
 def conectar_sheets():
+    # Los secretos en Streamlit ahora los guardaremos como un solo string JSON
+    creds_json = st.secrets["GOOGLE_CREDENTIALS_JSON"]  # <--- NOMBRE NUEVO
+    creds_dict = json.loads(creds_json)
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds_info = st.secrets["GOOGLE_CREDENTIALS"]
-    if isinstance(creds_info, str):
-        creds_dict = json.loads(creds_info)
-    else:
-        creds_dict = creds_info
     creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
     client = gspread.authorize(creds)
+    # La hoja debe llamarse EXACTAMENTE "Catálogo Biblioteca"
     return client.open("Catálogo Biblioteca").sheet1
 
+# ------------------------------------------------------------
+# FUNCIÓN PRINCIPAL
+# ------------------------------------------------------------
 def procesar_portada(image_file, gemini_key):
-    try:
-        cliente = genai.Client(api_key=gemini_key.strip())
-    except Exception as e:
-        st.error(f"Error al crear cliente Gemini: {e}")
-        return None
-
+    cliente = genai.Client(api_key=gemini_key.strip())
     bytes_data = image_file.getvalue()
-    
-    prompt = "Extrae el título y el autor de esta portada. Responde ÚNICAMENTE un objeto JSON válido sin texto adicional. Formato: {\"titulo\": \"...\", \"autor\": \"...\"}"
-    
+
+    # --- PROMPT MEJORADO ---
+    prompt = """
+    Eres un experto en reconocer portadas de libros.
+    Extrae el TÍTULO y el AUTOR de esta imagen.
+    Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional.
+    Si no estás seguro, escribe "Desconocido" en el campo correspondiente.
+    Formato exacto:
+    {"titulo": "titulo del libro", "autor": "nombre del autor"}
+    """
+
     try:
         respuesta = cliente.models.generate_content(
             model='gemini-2.5-flash',
@@ -42,30 +51,27 @@ def procesar_portada(image_file, gemini_key):
                 response_mime_type="application/json"
             )
         )
-        # Mostrar el texto devuelto para depuración (solo si estás en pruebas)
-        # st.write("Respuesta de Gemini:", respuesta.text)
-        
-        try:
-            datos = json.loads(respuesta.text)
-        except json.JSONDecodeError as e:
-            st.error(f"Gemini no devolvió JSON válido: {e}")
-            st.write("Texto recibido:", respuesta.text)
-            return None
-        
+        # Intentamos parsear el JSON
+        datos = json.loads(respuesta.text)
         titulo = datos.get("titulo", "Desconocido")
         autor = datos.get("autor", "Desconocido")
-        
-        if titulo == "Desconocido" and autor == "Desconocido":
-            st.warning("Gemini no pudo extraer título ni autor. Intenta con otra foto.")
-            return None
 
     except Exception as e:
-        st.error(f"Error al llamar a Gemini: {e}")
+        # Si falla, mostramos el error en la app para depurar
+        st.error(f"Error al leer la portada con Gemini: {e}")
         return None
 
-    # Buscar en Google Books
+    # Si no se detectó nada, salimos
+    if titulo == "Desconocido" and autor == "Desconocido":
+        st.warning("Gemini no pudo identificar título ni autor. Prueba con otra foto.")
+        return None
+
+    # --------------------------------------------------------
+    # BUSCAR EN GOOGLE BOOKS
+    # --------------------------------------------------------
     try:
-        url = f"https://www.googleapis.com/books/v1/volumes?q=intitle:{requests.utils.quote(titulo)}+inauthor:{requests.utils.quote(autor)}"
+        query = f"intitle:{requests.utils.quote(titulo)}+inauthor:{requests.utils.quote(autor)}"
+        url = f"https://www.googleapis.com/books/v1/volumes?q={query}"
         gb_res = requests.get(url).json()
         editorial = "S/D"
         anio = "S/D"
@@ -75,12 +81,15 @@ def procesar_portada(image_file, gemini_key):
             editorial = info.get("publisher", "S/D")
             anio = info.get("publishedDate", "S/D")[:4]
             paginas = str(info.get("pageCount", "S/D"))
-    except:
+    except Exception as e:
+        st.warning(f"No pude consultar Google Books: {e}")
         editorial = "Error"
         anio = "Error"
         paginas = "Error"
 
-    # Precio en Mercado Libre
+    # --------------------------------------------------------
+    # PRECIO EN MERCADO LIBRE
+    # --------------------------------------------------------
     precio = "Consultar"
     try:
         ml_url = f"https://api.mercadolibre.com/sites/MLA/search?q=libro%20{requests.utils.quote(titulo)}"
@@ -92,7 +101,9 @@ def procesar_portada(image_file, gemini_key):
     except:
         pass
 
-    # Guardar en Google Sheets
+    # --------------------------------------------------------
+    # GUARDAR EN GOOGLE SHEETS
+    # --------------------------------------------------------
     try:
         sheet = conectar_sheets()
         sheet.append_row([titulo, autor, editorial, anio, paginas, precio])
@@ -101,16 +112,19 @@ def procesar_portada(image_file, gemini_key):
         st.error(f"Error al guardar en Sheets: {e}")
         return None
 
-# Interfaz
+# ------------------------------------------------------------
+# INTERFAZ DE USUARIO
+# ------------------------------------------------------------
 foto = st.camera_input("📸 Sacale una foto a la portada")
+
 if foto:
-    with st.spinner("🔍 Analizando..."):
+    with st.spinner("🔍 Analizando portada y buscando información..."):
         try:
             gemini_key = st.secrets["GEMINI_API_KEY"]
             resultado = procesar_portada(foto, gemini_key)
             if resultado:
                 t, a, ed, an, p, pr = resultado
-                st.success("✅ ¡Guardado!")
+                st.success("✅ ¡Libro guardado exitosamente!")
                 st.write(f"**Título:** {t}")
                 st.write(f"**Autor:** {a}")
                 st.write(f"**Editorial:** {ed}")
@@ -118,4 +132,4 @@ if foto:
                 st.write(f"**Páginas:** {p}")
                 st.write(f"**Precio estimado:** {pr}")
         except Exception as e:
-            st.error(f"Error general: {e}")
+            st.error(f"Ocurrió un error general: {e}")
